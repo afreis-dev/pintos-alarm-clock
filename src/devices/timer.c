@@ -35,6 +35,7 @@ static struct list sleep_list;
 
 static intr_handler_func timer_interrupt;
 static void wake_sleepers (void);
+static list_less_func sleeper_less;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
@@ -98,13 +99,32 @@ timer_elapsed (int64_t then)
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
-timer_sleep (int64_t ticks) 
+timer_sleep (int64_t ticks)
 {
-  int64_t start = timer_ticks ();
+  struct sleeper s;
+  enum intr_level old_level;
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  if (ticks <= 0)
+    return;
+
+  s.wakeup_tick = timer_ticks () + ticks;
+  sema_init (&s.sema, 0);
+
+  old_level = intr_disable ();
+  list_insert_ordered (&sleep_list, &s.elem, sleeper_less, NULL);
+  intr_set_level (old_level);
+
+  sema_down (&s.sema);
+}
+
+static bool
+sleeper_less (const struct list_elem *a, const struct list_elem *b,
+              void *aux UNUSED)
+{
+  const struct sleeper *sa = list_entry (a, struct sleeper, elem);
+  const struct sleeper *sb = list_entry (b, struct sleeper, elem);
+  return sa->wakeup_tick < sb->wakeup_tick;
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
