@@ -28,6 +28,7 @@ struct sleeper
   {
     struct list_elem elem;
     int64_t wakeup_tick;
+    int priority;
     struct semaphore sema;
   };
 
@@ -109,6 +110,7 @@ timer_sleep (int64_t ticks)
     return;
 
   s.wakeup_tick = timer_ticks () + ticks;
+  s.priority = thread_get_priority ();
   sema_init (&s.sema, 0);
 
   old_level = intr_disable ();
@@ -124,7 +126,9 @@ sleeper_less (const struct list_elem *a, const struct list_elem *b,
 {
   const struct sleeper *sa = list_entry (a, struct sleeper, elem);
   const struct sleeper *sb = list_entry (b, struct sleeper, elem);
-  return sa->wakeup_tick < sb->wakeup_tick;
+  if (sa->wakeup_tick != sb->wakeup_tick)
+    return sa->wakeup_tick < sb->wakeup_tick;
+  return sa->priority > sb->priority;
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
