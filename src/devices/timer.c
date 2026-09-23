@@ -24,7 +24,17 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+struct sleeper
+  {
+    struct list_elem elem;
+    int64_t wakeup_tick;
+    struct semaphore sema;
+  };
+
+static struct list sleep_list;
+
 static intr_handler_func timer_interrupt;
+static void wake_sleepers (void);
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
@@ -35,6 +45,7 @@ static void real_time_delay (int64_t num, int32_t denom);
 void
 timer_init (void) 
 {
+  list_init (&sleep_list);
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 }
@@ -171,7 +182,22 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  wake_sleepers ();
   thread_tick ();
+}
+
+static void
+wake_sleepers (void)
+{
+  while (!list_empty (&sleep_list))
+    {
+      struct sleeper *s = list_entry (list_front (&sleep_list),
+                                      struct sleeper, elem);
+      if (s->wakeup_tick > ticks)
+        break;
+      list_pop_front (&sleep_list);
+      sema_up (&s->sema);
+    }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
